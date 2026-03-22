@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import Sidebar from "@/components/Sidebar";
-
+import "@uploadthing/react/styles.css";
 export const metadata: Metadata = {
   title: "Fakestagram",
   description: "Instagram clone — teaching project",
@@ -16,12 +16,12 @@ export default function RootLayout({
     <html lang="en">
       <body className="bg-gray-50 text-gray-900 antialiased">
         {/* Sidebar is a client component (uses usePathname) */}
-        <Sidebar />
+        <div className="p-10">
+          <Sidebar />
+        </div>
 
         {/* Main content — offset left by sidebar width on desktop, add bottom padding for mobile nav */}
-        <main className="lg:pl-64 min-h-screen pb-20 lg:pb-0">
-          {children}
-        </main>
+        <main className="lg:pl-64 min-h-screen pb-20 lg:pb-0">{children}</main>
       </body>
     </html>
   );

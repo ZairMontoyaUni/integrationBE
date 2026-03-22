@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Conversation, DirectMessage } from "@/lib/types";
 import { CURRENT_USER } from "@/lib/mock-data";
 import { formatDistanceToNow } from "@/lib/utils";
+import { uploadFiles } from "@/lib/uploadthing";
 
 interface Props {
   initialConversation: Conversation;
@@ -12,6 +13,7 @@ interface Props {
 export default function MessageThread({ initialConversation }: Props) {
   const [messages, setMessages] = useState(initialConversation.messages);
   const [text, setText] = useState("");
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [sending, setSending] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
@@ -19,24 +21,64 @@ export default function MessageThread({ initialConversation }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  async function uploadMedia(file: File) {
+    const endpoint = file.type.startsWith("video/")
+      ? "videoUploader"
+      : "imageUploader";
+    const files = await uploadFiles(endpoint, { files: [file] });
+    const url = files[0]?.ufsUrl ?? files[0]?.url;
+
+    if (!url) {
+      throw new Error("Failed to upload media");
+    }
+
+    return url;
+  }
+
   async function handleSend(e: React.FormEvent) {
     e.preventDefault();
-    if (!text.trim() || sending) return;
+    const trimmedText = text.trim();
+    if ((!trimmedText && !selectedFile) || sending) return;
+
+    setSending(true);
+
+    const fallbackText = selectedFile ? "Sent an attachment" : "";
+    const messageText = trimmedText || fallbackText;
+    const mediaUrl = selectedFile ? await uploadMedia(selectedFile) : undefined;
 
     // Optimistic update — add message locally right away
     const optimistic: DirectMessage = {
       id: `msg_optimistic_${Date.now()}`,
       senderId: CURRENT_USER.id,
-      text: text.trim(),
+      text: messageText,
+      mediaUrl,
       createdAt: new Date().toISOString(),
       isRead: false,
     };
     setMessages((prev) => [...prev, optimistic]);
     setText("");
-    setSending(true);
+    setSelectedFile(null);
 
-    // TODO: Change the URL below to your real backend endpoint.
-    // Example: fetch("https://your-api.com/messages", { method: "POST", ... })
+    try {
+      const res = await fetch("/api/messages", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          conversationId: initialConversation.id,
+          text: messageText,
+          mediaUrl,
+        }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to send message");
+      }
+
+      const updatedConversation = (await res.json()) as Conversation;
+      setMessages(updatedConversation.messages);
+    } catch {
+      setMessages((prev) => prev.filter((msg) => msg.id !== optimistic.id));
+    }
 
     setSending(false);
   }
@@ -52,8 +94,12 @@ export default function MessageThread({ initialConversation }: Props) {
           className="w-9 h-9 rounded-full object-cover"
         />
         <div>
-          <p className="font-semibold text-sm">{initialConversation.participant.username}</p>
-          <p className="text-xs text-gray-400">{initialConversation.participant.name}</p>
+          <p className="font-semibold text-sm">
+            {initialConversation.participant.username}
+          </p>
+          <p className="text-xs text-gray-400">
+            {initialConversation.participant.name}
+          </p>
         </div>
       </div>
 
@@ -62,15 +108,31 @@ export default function MessageThread({ initialConversation }: Props) {
         {messages.map((msg) => {
           const isMe = msg.senderId === CURRENT_USER.id;
           return (
-            <div key={msg.id} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
+            <div
+              key={msg.id}
+              className={`flex ${isMe ? "justify-end" : "justify-start"}`}
+            >
               <div
-                className={`max-w-xs px-4 py-2 rounded-2xl text-sm ${isMe
+                className={`max-w-xs px-4 py-2 rounded-2xl text-sm ${
+                  isMe
                     ? "bg-blue-500 text-white rounded-br-sm"
                     : "bg-gray-100 text-gray-900 rounded-bl-sm"
-                  }`}
+                }`}
               >
                 <p>{msg.text}</p>
-                <p className={`text-xs mt-1 ${isMe ? "text-blue-100" : "text-gray-400"}`}>
+                {msg.mediaUrl ? (
+                  <a
+                    href={msg.mediaUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={`inline-block text-xs mt-1 underline ${isMe ? "text-blue-100" : "text-blue-600"}`}
+                  >
+                    View attachment
+                  </a>
+                ) : null}
+                <p
+                  className={`text-xs mt-1 ${isMe ? "text-blue-100" : "text-gray-400"}`}
+                >
                   {formatDistanceToNow(msg.createdAt)}
                 </p>
               </div>
@@ -81,10 +143,23 @@ export default function MessageThread({ initialConversation }: Props) {
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSend} className="flex items-center gap-3 px-4 py-3 border-t border-gray-200">
-        {/* TODO: Add a file picker here for media messages.
-            After picking a file, upload it with UploadThing and pass the returned URL
-            as `mediaUrl` in the fetch body above. */}
+      <form
+        onSubmit={handleSend}
+        className="flex items-center gap-3 px-4 py-3 border-t border-gray-200"
+      >
+        <label
+          htmlFor="media-file"
+          className="cursor-pointer text-sm font-semibold text-gray-500 hover:text-gray-700"
+        >
+          +
+        </label>
+        <input
+          id="media-file"
+          type="file"
+          onChange={(e) => setSelectedFile(e.target.files?.[0] ?? null)}
+          className="hidden"
+        />
+
         <input
           type="text"
           value={text}
@@ -92,9 +167,17 @@ export default function MessageThread({ initialConversation }: Props) {
           placeholder="Message…"
           className="flex-1 bg-gray-100 rounded-full px-4 py-2 text-sm outline-none"
         />
+        {selectedFile ? (
+          <span
+            className="text-xs text-gray-500 truncate max-w-32"
+            title={selectedFile.name}
+          >
+            {selectedFile.name}
+          </span>
+        ) : null}
         <button
           type="submit"
-          disabled={!text.trim() || sending}
+          disabled={(!text.trim() && !selectedFile) || sending}
           className="text-sm font-semibold text-blue-500 disabled:opacity-40"
         >
           {sending ? "…" : "Send"}

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { MOCK_POSTS, CURRENT_USER, CURRENT_USER_POSTS } from "@/lib/mock-data";
+import { MOCK_POSTS, CURRENT_USER, CURRENT_USER_POSTS, MOCK_USERS } from "@/lib/mock-data";
 
 const USER_STORE: Record<string, typeof CURRENT_USER> = {
   [CURRENT_USER.username]: CURRENT_USER,
@@ -11,7 +11,9 @@ export async function GET(
 ) {
   const { username } = await params;
 
-  const user = USER_STORE[username] ?? {
+  const existingUser = USER_STORE[username] ?? MOCK_USERS.find((u) => u.username === username);
+
+  const user = existingUser ?? {
     id: `u_${username}`,
     username,
     name: username,
